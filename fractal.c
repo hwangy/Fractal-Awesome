@@ -14,7 +14,7 @@ static SDL_Window* window;
 SDL_Renderer* render;
 SDL_Texture* texture;
 SDL_Surface* surface;
-uint32_t* display, *rawDisplay, *bufferedDisplay;
+uint32_t* display, *rawDisplay, *bufferedDisplay, *miniMap;
 char* displayText;
 const unsigned char* fontData = gfxPrimitivesFontdata;
 
@@ -25,12 +25,14 @@ pthread_mutex_t mutex;
 void thread(void* simon);
 int updated = 0;
 int tileRenderDistance = 5; 				//Odd numbers preferred
+int progress = 0;
 
 struct timespec start = {.tv_nsec = 0, .tv_sec = 0};
 struct timespec end ={.tv_nsec = 0, .tv_sec = 0};
 struct timespec p = {.tv_nsec = 0, .tv_sec = 0};
 
 int dimX, dimY;
+int miniDimX, miniDimY, miniX, miniY;
 
 int resizeMode = 0, mouseDown = 0;
 int offX, offY;
@@ -42,7 +44,8 @@ int getCount(double x, double y);
 void update();
 void resize();
 void recalc();
-void shift();
+void shift(int fast);
+void generateMiniMap();
 
 int main(int argc, char** argv) {
 	dimX = dimY = 600; //Cool C stuff
@@ -57,6 +60,9 @@ int main(int argc, char** argv) {
 	display = malloc(sizeof(uint32_t)*dimX*dimY);
 	rawDisplay = malloc(sizeof(uint32_t)*dimX*dimY);
 	bufferedDisplay = malloc(sizeof(uint32_t)*dimX*dimY*tileRenderDistance*tileRenderDistance);
+	
+	//Mini map variable initialization
+	miniDimX = 150; miniDimY = 150; miniX = dimX-miniDimX; miniY = dimY-miniDimY; miniMap = malloc(sizeof(uint32_t)*miniDimX*miniDimY);
 	
 	MinR = -2.0;
 	MaxR = 2.0;
@@ -78,6 +84,7 @@ int main(int argc, char** argv) {
 				return 0;
 			}
 			if (events.type == SDL_KEYDOWN && events.key.keysym.sym == SDLK_LSHIFT) resizeMode = 1;
+			else if (events.type == SDL_KEYDOWN && events.key.keysym.sym == SDLK_r) {updated = 0; recalc(); sem_post(&generateBuff);}
 			else if (events.type == SDL_KEYUP && events.key.keysym.sym == SDLK_LSHIFT) resizeMode = 0;
 			if (events.type == SDL_MOUSEBUTTONDOWN) {
 				mouseDown = 1;
@@ -90,7 +97,6 @@ int main(int argc, char** argv) {
 					resize();
 					recalc();
 				
-					//Routine to ensure buffered image has loaded
 					sem_post(&generateBuff);
 				}
 
@@ -103,7 +109,9 @@ int main(int argc, char** argv) {
 
 		if (mouseDown && !resizeMode) {
 			SDL_GetMouseState(&mouseX, &mouseY);
-			shift();
+			if (mouseX >= miniX && mouseX < miniX + miniDimX &&
+			    mouseY >= miniY && mouseY < miniY + miniDimY) shift(1);
+			else shift(0);
 		}
 
 		clock_gettime(CLOCK_MONOTONIC, &end);
@@ -132,7 +140,7 @@ void thread(void* simon) {
 	
 	while (1) {
 		if (sem_trywait(&generateBuff) == 0) {
-			puts("STARTED");
+			progress = 0;
 			buffMinR = MinR - (MaxR - MinR)*mult;
 			buffMaxR = MaxR + (MaxR - MinR)*mult;
 			buffMinI = MinI - (MaxI - MinI)*mult;
@@ -143,6 +151,7 @@ void thread(void* simon) {
 			int x, y;
 			for (x = 0; x < dimX*tileRenderDistance; x++) {
 				for (y = 0; y < dimY*tileRenderDistance; y++) {
+					progress = (int)(100.0f*(float)x/(dimX*tileRenderDistance));
 					val = (buffMinR+x*ref) + (buffMaxI-y*imf)*I;
 					z = val;
 					count = 0;
@@ -161,7 +170,7 @@ void thread(void* simon) {
 			bufferedDisplay = toTransmit;
 			updated = 1;
 			pthread_mutex_unlock(&mutex);
-			puts("FINISHED");
+			generateMiniMap();
 		}
 	}
 }
@@ -182,6 +191,7 @@ uint32_t getColor(int x, int y) {
 }
 
 void update() {
+
 	int x, y;
 	for (x = 0; x < dimX; x++) {
 		for (y = 0; y < dimY; y++) {
@@ -191,8 +201,8 @@ void update() {
 						bufferedDisplay[(x+offX) + (y+offY)*dimX*tileRenderDistance];
 		}
 	}
-	//memcpy(display, rawDisplay, sizeof(uint32_t)*dimX*dimY);
 
+	//Create zoom box
 	if (mouseDown && resizeMode) {
 		double proportion = (double)dimX/dimY;
 		realEX = (abs(mouseX - startX) > abs(mouseY - startY))?abs(mouseX-startX):(int)((double)abs(mouseY - startY)*proportion);
@@ -206,11 +216,30 @@ void update() {
 		drawLine(display, dimX, dimY, realEX, startY, realEX, realEY, 0xFFFFFF);
 		drawLine(display, dimX, dimY, startX, realEY, realEX, realEY, 0xFFFFFF);
 	}
+	
+	//Show mini map
+	for (x = miniX; x < miniX + miniDimX; x++) {
+		for (y = miniY; y < miniY + miniDimY; y++) {
+			display[x + y*dimX] = (x == miniX || y == miniY || 
+					       x == miniX+miniDimX-1 || y == miniY+miniDimY-1)?0x000000:miniMap[(x-miniX) + (y-miniY)*miniDimX];
+		}
+	}
+	//Create focus box
+	int sX = miniX + ((float)offX/(dimX*tileRenderDistance))*miniDimX;
+	int sY = miniY + ((float)offY/(dimY*tileRenderDistance))*miniDimY;
+	int wX = miniDimX/tileRenderDistance;
+	int wY = miniDimY/tileRenderDistance;
+	drawLine(display, dimX, dimY, sX, sY, sX+wX, sY, 0xFF0000);
+	drawLine(display, dimX, dimY, sX, sY, sX, sY+wY, 0xFF0000);
+	drawLine(display, dimX, dimY, sX+wX, sY, sX+wX, sY+wY, 0xFF0000);
+	drawLine(display, dimX, dimY, sX, sY+wY, sX+wX, sY+wY, 0xFF0000);
+		
 
+	//Show buffer info
 	if (!updated) {
-		snprintf(displayText, 100, "%s", "BUFFERING>>>");
+		snprintf(displayText, 100, "BUFFERING: %d%%", progress);
 		drawText(display, dimX, dimY, fontData, displayText, 1, 0, 0, 0xFFFFFF);
-	}	
+	}
 
 	SDL_UpdateTexture(texture, NULL, display, dimX*4);
 	SDL_RenderClear(render);
@@ -254,17 +283,24 @@ void recalc() {
 	
 	offX = dimX*(tileRenderDistance-1)/2;
 	offY = dimY*(tileRenderDistance-1)/2;
+	
+	generateMiniMap();	
 }
 
-void shift() {
+void shift(int fast) {
 	double ShiftR = (double)(mouseX - startX)/dimX*(MaxR - MinR);
 	double ShiftI = (double)(mouseY - startY)/dimY*(MaxI - MinI);
+	
+	if (fast) {
+		ShiftR = ShiftR * -1.0 * (tileRenderDistance*dimX/miniDimX);
+		ShiftI = ShiftI * -1.0 * (tileRenderDistance*dimY/miniDimY);
+	}
 
 	MinR -= ShiftR; MaxR -= ShiftR;
 	MinI += ShiftI; MaxI += ShiftI;
 
-	offX -= (mouseX - startX);
-	offY -= (mouseY - startY);
+	offX -= (fast)?tileRenderDistance*-1*(mouseX - startX)*(dimX/miniDimX):(mouseX - startX);
+	offY -= (fast)?tileRenderDistance*-1*(mouseY - startY)*(dimY/miniDimY):(mouseY - startY);
 	
 	startX = mouseX;
 	startY = mouseY;
@@ -272,4 +308,29 @@ void shift() {
 
 	//recalc();
 	update();
+}
+
+void generateMiniMap() {
+	//Obviously works best where 0 = dimX mod miniDimX
+	int sfX = (int)(dimX*tileRenderDistance)/miniDimX;
+	int sfY = (int)(dimY*tileRenderDistance)/miniDimY;
+
+	//Calculate average pixel color for each segment
+	int x, y;
+	int aC = 0;
+	for (y = 0; y < miniDimY; y++) {
+		for (x = 0; x < miniDimX; x++) {
+			int sX, sY;
+			uint32_t avgColor = 0x000000;
+			aC = 0;
+			for (sX	= 0; sX < sfX; sX++) {
+				for (sY = 0; sY < sfY; sY++) {
+					//refactor average
+					avgColor *= aC/++aC;
+					avgColor += bufferedDisplay[(x*sfX+sX) + (y*sfY+sY)*dimY*tileRenderDistance]/aC;
+				}
+			}
+			miniMap[x+y*miniDimX] = avgColor;
+		}
+	}
 }
