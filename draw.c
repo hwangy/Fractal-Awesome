@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "draw.h"
+#define DRAW_LIBRARY
 
 void drawBox(uint32_t* field, int dimX, int dimY, int x, int y, int w, int h, uint32_t color){ 
 	int i, j;
