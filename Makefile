@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-Wall -O2 -c $(DEBUG)
 
-LFLAGS=-pthread `sdl2-config --cflags --libs`
+LFLAGS=-pthread `sdl2-config --cflags --libs` -lX11
 
 fractal: draw.o textInput.o
 	$(CC) $(DEBUG) draw.o fractal.c -o fractal $(LFLAGS)

@@ -9,12 +9,24 @@
 #include "SDL_gfxPrimitives_font.h"
 #include "draw.h"
 
+#ifndef WINDOWS
+	#include <X11/Xlib.h>
+	#include <SDL_syswm.h>
+	
+	//Some stuff to allow window moving in *nix
+	SDL_SysWMinfo info;
+	XWindowAttributes attrs;
+	Window root, parent, *children;
+	unsigned int assigned;
+#endif
+
 const int rmax = 30, iterations = 100;
+
 static SDL_Window* window;
 SDL_Renderer* render;
 SDL_Texture* texture;
 SDL_Surface* surface;
-uint32_t* display, *rawDisplay, *bufferedDisplay, *miniMap;
+uint32_t* display, *rawDisplay, *bufferedDisplay, *miniMap, *finalDisplay;
 char* displayText;
 const unsigned char* fontData = gfxPrimitivesFontdata;
 
@@ -31,10 +43,11 @@ struct timespec start = {.tv_nsec = 0, .tv_sec = 0};
 struct timespec end ={.tv_nsec = 0, .tv_sec = 0};
 struct timespec p = {.tv_nsec = 0, .tv_sec = 0};
 
+int borderTop = 15, borderBot = 3, borderLeft = 3, borderRight = 3;
 int dimX, dimY;
 int miniDimX, miniDimY, miniX, miniY;
 
-int resizeMode = 0, mouseDown = 0;
+int resizeMode = 0, mouseDown = 0, dragMode = 0;
 int offX, offY;
 int mouseX, mouseY, startX, startY;
 int startX, startY, realEX, realEY;
@@ -46,6 +59,9 @@ void resize();
 void recalc();
 void shift(int fast);
 void generateMiniMap();
+void createBorder();
+
+void dragResize(int w, int h);
 
 int main(int argc, char** argv) {
 	dimX = dimY = 600; //Cool C stuff
@@ -53,14 +69,32 @@ int main(int argc, char** argv) {
 	displayText = malloc(sizeof(char)*100);
 
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
-	window = SDL_CreateWindow("Fractal", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, dimX, dimY, 0);
+	
+	//Couldn't get system window resize events to work, going to make my own borders :P
+	window = SDL_CreateWindow("Fractal", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 
+			dimX+borderLeft+borderRight, dimY+borderTop+borderBot, SDL_WINDOW_BORDERLESS);
+
 	render = SDL_CreateRenderer(window, -1, 0);
-	texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, dimX, dimY);
+	texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+			dimX+borderLeft+borderRight, dimY+borderTop+borderBot);
 	
 	display = malloc(sizeof(uint32_t)*dimX*dimY);
 	rawDisplay = malloc(sizeof(uint32_t)*dimX*dimY);
 	bufferedDisplay = malloc(sizeof(uint32_t)*dimX*dimY*tileRenderDistance*tileRenderDistance);
+	finalDisplay = malloc(sizeof(uint32_t)*(dimX+borderLeft+borderRight)*(dimY+borderBot+borderTop));
+	createBorder();
+
+#ifndef WINDOWS
+	SDL_VERSION(&info.version);
+	if (SDL_GetWindowWMInfo(window, &info) > 0 && info.subsystem == SDL_SYSWM_X11) {
+		XQueryTree(info.info.x11.display, info.info.x11.window, &root, &parent, &children, &assigned);
+		if (children != NULL) XFree(children);
+		XGetWindowAttributes(info.info.x11.display, root, &attrs);
+		printf("DISPLAY RES %dX%d\n", attrs.width, attrs.height);
+	}
+#endif
 	
+
 	//Mini map variable initialization
 	miniDimX = 150; miniDimY = 150; miniX = dimX-miniDimX; miniY = dimY-miniDimY; miniMap = malloc(sizeof(uint32_t)*miniDimX*miniDimY);
 	
@@ -89,6 +123,14 @@ int main(int argc, char** argv) {
 			if (events.type == SDL_MOUSEBUTTONDOWN) {
 				mouseDown = 1;
 				SDL_GetMouseState(&startX, &startY);
+
+				//Close window button
+				if (startX > (dimX+borderLeft+borderRight-8-3-3) && startY < 3+8+3) {
+					SDL_DestroyWindow(window);
+					SDL_Quit();
+					return 0;
+				} else if (startY < borderTop) dragMode = 1;
+
 			} else if (events.type == SDL_MOUSEBUTTONUP) {
 				mouseDown = 0;
 				SDL_GetMouseState(&mouseX, &mouseY);
@@ -101,18 +143,21 @@ int main(int argc, char** argv) {
 				}
 
 				resizeMode = 0;
+				dragMode = 0;
 			}
 		}
 		SDL_GetMouseState(&mouseX, &mouseY);
 
 		update();
 
-		if (mouseDown && !resizeMode) {
+		if (mouseDown && !resizeMode && !dragMode) {
 			SDL_GetMouseState(&mouseX, &mouseY);
 			if (mouseX >= miniX && mouseX < miniX + miniDimX &&
 			    mouseY >= miniY && mouseY < miniY + miniDimY) shift(1);
 			else shift(0);
-		}
+		} //else if (mouseDown && !resizeMode && dragMode) {
+
+			
 
 		clock_gettime(CLOCK_MONOTONIC, &end);
 		long int sleep = 25000000 - (end.tv_nsec - start.tv_nsec);
@@ -241,7 +286,12 @@ void update() {
 		drawText(display, dimX, dimY, fontData, displayText, 1, 0, 0, 0xFFFFFF);
 	}
 
-	SDL_UpdateTexture(texture, NULL, display, dimX*4);
+	//Now put the display onto the final one, which has borders and such
+	for (x = 0; x < dimX; x++) {
+		for (y = 0; y < dimY; y++) finalDisplay[(x+borderLeft)+(y+borderTop)*(dimX+borderLeft+borderRight)] = display[x+y*dimX];
+	}
+
+	SDL_UpdateTexture(texture, NULL, finalDisplay, (dimX+borderLeft+borderRight)*4);
 	SDL_RenderClear(render);
 	SDL_RenderCopy(render, texture, 0, 0);
 	SDL_RenderPresent(render);
@@ -333,4 +383,18 @@ void generateMiniMap() {
 			miniMap[x+y*miniDimX] = avgColor;
 		}
 	}
+}
+
+void dragResize(int w, int h) {
+	
+}
+
+void createBorder() {
+	int x, y;
+	for (x = 0; x < dimX + borderLeft+borderRight; x++) {
+		for (y = 0; y < dimY + borderTop + borderBot; y++) {
+			finalDisplay[x + y*(dimX+borderLeft+borderRight)] = 0x444444;
+		}
+	}
+	drawText(finalDisplay, dimX+borderLeft+borderRight, dimY+borderTop+borderBot, fontData, "X", 1, (dimX+borderLeft+borderRight-8-3), 3, 0xFFFFFF);
 }
