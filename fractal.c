@@ -20,6 +20,11 @@
 	unsigned int assigned;
 	int drag_x, drag_y, new_x, new_y;
 	int window_posX, window_posY;
+	
+	//Pretty much used for nothing except placeholders	
+	int rtx, rty;
+	Window child;
+	unsigned int mnt;
 #endif
 
 const int rmax = 30, iterations = 100;
@@ -161,9 +166,6 @@ int main(int argc, char** argv) {
 			else shift(0);
 		} else if (mouseDown && !resizeMode && dragMode) {
 #ifndef WINDOWS
-			int rtx, rty;
-			Window child;
-			unsigned int mnt;
 			XQueryPointer(info.info.x11.display, info.info.x11.window, &root, &child, &drag_x, &drag_y, &rtx, &rty, &mnt);
 			
 			XGetWindowAttributes(info.info.x11.display, info.info.x11.window, &attrs);
@@ -182,9 +184,6 @@ int main(int argc, char** argv) {
 
 		if (mouseDown && !resizeMode && dragMode) {
 #ifndef WINDOWS
-			int rtx, rty;
-			Window child;
-			unsigned int mnt;
 			XQueryPointer(info.info.x11.display, info.info.x11.window, &root, &child, &new_x, &new_y, &rtx, &rty, &mnt);
 			XMoveWindow(info.info.x11.display, info.info.x11.window, attrs.x + (new_x - drag_x), attrs.y + (new_y - drag_y));
 #endif
