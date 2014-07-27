@@ -18,6 +18,8 @@
 	XWindowAttributes attrs;
 	Window root, parent, *children;
 	unsigned int assigned;
+	int drag_x, drag_y, new_x, new_y;
+	int window_posX, window_posY;
 #endif
 
 const int rmax = 30, iterations = 100;
@@ -60,6 +62,8 @@ void recalc();
 void shift(int fast);
 void generateMiniMap();
 void createBorder();
+
+Window getWindow();
 
 void dragResize(int w, int h);
 
@@ -155,7 +159,17 @@ int main(int argc, char** argv) {
 			if (mouseX >= miniX && mouseX < miniX + miniDimX &&
 			    mouseY >= miniY && mouseY < miniY + miniDimY) shift(1);
 			else shift(0);
-		} //else if (mouseDown && !resizeMode && dragMode) {
+		} else if (mouseDown && !resizeMode && dragMode) {
+#ifndef WINDOWS
+			int rtx, rty;
+			Window child;
+			unsigned int mnt;
+			XQueryPointer(info.info.x11.display, info.info.x11.window, &root, &child, &drag_x, &drag_y, &rtx, &rty, &mnt);
+			
+			XGetWindowAttributes(info.info.x11.display, info.info.x11.window, &attrs);
+			XTranslateCoordinates(info.info.x11.display, info.info.x11.window, root, 0, 0, &attrs.x, &attrs.y, &child);
+#endif
+		}
 
 			
 
@@ -164,6 +178,16 @@ int main(int argc, char** argv) {
 		if (sleep > 0) {
 			p.tv_nsec = sleep;
 			nanosleep(&p, NULL);
+		}
+
+		if (mouseDown && !resizeMode && dragMode) {
+#ifndef WINDOWS
+			int rtx, rty;
+			Window child;
+			unsigned int mnt;
+			XQueryPointer(info.info.x11.display, info.info.x11.window, &root, &child, &new_x, &new_y, &rtx, &rty, &mnt);
+			XMoveWindow(info.info.x11.display, info.info.x11.window, attrs.x + (new_x - drag_x), attrs.y + (new_y - drag_y));
+#endif
 		}
 	}
 
@@ -397,4 +421,12 @@ void createBorder() {
 		}
 	}
 	drawText(finalDisplay, dimX+borderLeft+borderRight, dimY+borderTop+borderBot, fontData, "X", 1, (dimX+borderLeft+borderRight-8-3), 3, 0xFFFFFF);
+}
+
+Window getWindow() {
+	int toRevert;
+	Window w;
+	XGetInputFocus(info.info.x11.display, &w, &toRevert);
+
+	return w;
 }
