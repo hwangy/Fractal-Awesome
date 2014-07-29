@@ -20,7 +20,6 @@
 	Window root, parent, *children;
 	unsigned int assigned;
 	int drag_x, drag_y, new_x, new_y;
-	int window_posX, window_posY;
 	
 	//Pretty much used for nothing except placeholders	
 	int rtx, rty;
@@ -31,12 +30,34 @@
 	int isDragL = 0, isDragR = 0, isDragB = 0, isDragT = 0;
 #endif
 
+struct WOO_Window {
+	int dimX;
+	int dimY;
+	int borderLeft;
+	int borderTop;
+	int borderRight;
+	int borderBot;
+	SDL_Window* window;
+	SDL_Renderer* render;
+	SDL_Texture* texture;
+
+	uint32_t* display;
+};
+typedef struct WOO_Window WOO_Window;
+
 const int rmax = 30, iterations = 100;
 
 static SDL_Window* window;
 SDL_Renderer* render;
 SDL_Texture* texture;
-SDL_Surface* surface;
+
+	//This is going to be replaced by the WOO_Window structure
+	static SDL_Window* windowSA;
+	SDL_Renderer* renderSA;
+	SDL_Texture* textureSA;
+	int dimXSA = 200, dimYSA = 200;
+	//TO BE REPALCED
+
 uint32_t* display, *bufferedDisplay, *miniMap, *finalDisplay;
 char* displayText;
 const unsigned char* fontData = gfxPrimitivesFontdata;
@@ -71,12 +92,29 @@ void recalc();
 void shift(int fast);
 void generateMiniMap();
 void createBorder();
-
-Window getWindow();
-
-void dragResize(int w, int h);
+void createSaveAs();
 
 int main(int argc, char** argv) {
+	/**
+	 * Need to conver program to be relatively OO and use this 
+	 * window struct. This will be helpful when making multiple windows,
+	 * particuarily the Save As dialog for the fractal
+	 */
+	/*WOO_Window mw = {
+		.dimX = 600,
+		.dimY = 600,
+		.borderTop = 15,
+		.borderLeft = 3,
+		.borderRight = 3,
+		.borderBot = 3,
+		.window = SDL_CreateWindow("Fractal1", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 
+			mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot, SDL_WINDOW_RESIZABLE),
+		.render = SDL_CreateRenderer(mw.window, -1, 0),
+		.texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+			mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot),
+		.display = malloc(sizeof(uint32_t)*(mw.dimX+mw.borderLeft+mw.borderRight)*(mw.dimY+mw.borderTop+mw.borderRight))
+	};*/
+
 	oDimX = oDimY = dimX = dimY = 600; //Cool C stuff
 
 	displayText = malloc(sizeof(char)*100);
@@ -90,7 +128,7 @@ int main(int argc, char** argv) {
 	render = SDL_CreateRenderer(window, -1, 0);
 	texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
 			dimX+borderLeft+borderRight, dimY+borderTop+borderBot);
-	
+
 	display = malloc(sizeof(uint32_t)*dimX*dimY);
 	bufferedDisplay = malloc(sizeof(uint32_t)*dimX*dimY*tileRenderDistance*tileRenderDistance);
 	finalDisplay = malloc(sizeof(uint32_t)*(dimX+borderLeft+borderRight)*(dimY+borderBot+borderTop));
@@ -226,7 +264,7 @@ int main(int argc, char** argv) {
 				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, attrs.x, attrs.y, attrs.width + (new_x - drag_x), attrs.height);
 				dimX = attrs.width - borderLeft - borderRight;
 				isDragR = 1;
-			} else if (drag_x < borderLeft + attrs.x || isDragL) {
+			} /*else if (drag_x < borderLeft + attrs.x || isDragL) {
 				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, attrs.x + (new_x - drag_x), attrs.y, attrs.width - (new_x - drag_x), attrs.height);
 				dimX = attrs.width - borderLeft - borderRight;
 				isDragL = 1;
@@ -238,6 +276,15 @@ int main(int argc, char** argv) {
 				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, attrs.x, attrs.y + (new_x - drag_x), attrs.width, attrs.height - (new_x - drag_x));
 				dimY = attrs.height - borderTop - borderBot;
 				isDragT = 1;
+			}*/
+
+			//Adjust maximums
+			if (isDragB || isDragR) {
+				double ShiftR = (double)(new_x - drag_x)/dimX*(MaxR - MinR);
+				double ShiftI = (double)(new_y - drag_y)/dimY*(MaxI - MinI);
+
+				MaxR -= ShiftR;
+				MaxI += ShiftI;
 			}
 
 				
@@ -487,10 +534,12 @@ void createBorder() {
 	drawText(finalDisplay, dimX+borderLeft+borderRight, dimY+borderTop+borderBot, fontData, "X", 1, (dimX+borderLeft+borderRight-8-3), 3, 0xFFFFFF);
 }
 
-Window getWindow() {
-	int toRevert;
-	Window w;
-	XGetInputFocus(info.info.x11.display, &w, &toRevert);
+/*void createSaveAs() {
+	window = SDL_CreateWindow("Save As", attrs.x + dimX + borderLeft + borderRight + 10, SDL_WINDOWPOS_UNDEFINED,
+			200, 200, SDL_WINDOW_BORDERLESS);
 
-	return w;
-}
+	renderSA = SDL_CreateRenderer(windowSA, -1, 0);
+	textureSA = SDL_CreateTexture(renderSA, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+			dimX+borderLeft+borderRight, dimY+borderTop+borderBot);
+}*/
+	
