@@ -11,6 +11,7 @@
 
 #ifndef WINDOWS
 	#include <X11/Xlib.h>
+	#include <X11/cursorfont.h>
 	#include <SDL_syswm.h>
 	
 	//Some stuff to allow window moving in *nix
@@ -25,6 +26,9 @@
 	int rtx, rty;
 	Window child;
 	unsigned int mnt;
+
+	Cursor* xCursors;
+	int isDragL = 0, isDragR = 0, isDragB = 0, isDragT = 0;
 #endif
 
 const int rmax = 30, iterations = 100;
@@ -33,7 +37,7 @@ static SDL_Window* window;
 SDL_Renderer* render;
 SDL_Texture* texture;
 SDL_Surface* surface;
-uint32_t* display, *rawDisplay, *bufferedDisplay, *miniMap, *finalDisplay;
+uint32_t* display, *bufferedDisplay, *miniMap, *finalDisplay;
 char* displayText;
 const unsigned char* fontData = gfxPrimitivesFontdata;
 
@@ -51,7 +55,7 @@ struct timespec end ={.tv_nsec = 0, .tv_sec = 0};
 struct timespec p = {.tv_nsec = 0, .tv_sec = 0};
 
 int borderTop = 15, borderBot = 3, borderLeft = 3, borderRight = 3;
-int dimX, dimY;
+int dimX, dimY, oDimX, oDimY;
 int miniDimX, miniDimY, miniX, miniY;
 
 int resizeMode = 0, mouseDown = 0, dragMode = 0;
@@ -73,7 +77,7 @@ Window getWindow();
 void dragResize(int w, int h);
 
 int main(int argc, char** argv) {
-	dimX = dimY = 600; //Cool C stuff
+	oDimX = oDimY = dimX = dimY = 600; //Cool C stuff
 
 	displayText = malloc(sizeof(char)*100);
 
@@ -81,14 +85,13 @@ int main(int argc, char** argv) {
 	
 	//Couldn't get system window resize events to work, going to make my own borders :P
 	window = SDL_CreateWindow("Fractal", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 
-			dimX+borderLeft+borderRight, dimY+borderTop+borderBot, SDL_WINDOW_BORDERLESS);
+			dimX+borderLeft+borderRight, dimY+borderTop+borderBot, SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE);
 
 	render = SDL_CreateRenderer(window, -1, 0);
 	texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
 			dimX+borderLeft+borderRight, dimY+borderTop+borderBot);
 	
 	display = malloc(sizeof(uint32_t)*dimX*dimY);
-	rawDisplay = malloc(sizeof(uint32_t)*dimX*dimY);
 	bufferedDisplay = malloc(sizeof(uint32_t)*dimX*dimY*tileRenderDistance*tileRenderDistance);
 	finalDisplay = malloc(sizeof(uint32_t)*(dimX+borderLeft+borderRight)*(dimY+borderBot+borderTop));
 	createBorder();
@@ -99,8 +102,24 @@ int main(int argc, char** argv) {
 		XQueryTree(info.info.x11.display, info.info.x11.window, &root, &parent, &children, &assigned);
 		if (children != NULL) XFree(children);
 		XGetWindowAttributes(info.info.x11.display, root, &attrs);
-		printf("DISPLAY RES %dX%d\n", attrs.width, attrs.height);
 	}
+
+	/**
+	 * Creates cursors for all 4 border adjustments
+	 * and the general cursror
+	 *
+	 * Top Border ->	XC_top_side	138
+	 * Left Border ->	XC_left_side	70
+	 * Right Border ->	XC_right_side	96
+	 * Bottom Border ->	XC_bottom_side	16
+	 * General ->		XC_left_ptr	68
+	 */
+	xCursors = malloc(sizeof(Cursor)*5);
+	xCursors[0] = XCreateFontCursor(info.info.x11.display, 68);
+	xCursors[1] = XCreateFontCursor(info.info.x11.display, 138);
+	xCursors[2] = XCreateFontCursor(info.info.x11.display, 70);
+	xCursors[3] = XCreateFontCursor(info.info.x11.display, 96);
+	xCursors[4] = XCreateFontCursor(info.info.x11.display, 16);
 #endif
 	
 
@@ -115,6 +134,8 @@ int main(int argc, char** argv) {
 	
 	sem_init(&generateBuff, 0, 1);
 	pthread_create(&threadID, NULL, (void* (*)(void*))&thread, (int*)1);
+
+	int startDrag = 0;
 
 	while (1) {
 		clock_gettime(CLOCK_MONOTONIC, &start);
@@ -138,7 +159,11 @@ int main(int argc, char** argv) {
 					SDL_DestroyWindow(window);
 					SDL_Quit();
 					return 0;
-				} else if (startY < borderTop) dragMode = 1;
+				} else if ((startY < borderTop || startY > borderTop+dimY) ||
+					   (startX < borderLeft || startX > borderLeft+dimX)) {	//Testing to see if grabbing border
+					dragMode = 1;
+					startDrag = 1;
+				}
 
 			} else if (events.type == SDL_MOUSEBUTTONUP) {
 				mouseDown = 0;
@@ -153,9 +178,15 @@ int main(int argc, char** argv) {
 
 				resizeMode = 0;
 				dragMode = 0;
+				isDragB = isDragL = isDragR = isDragT = 0;
 			}
 		}
 		SDL_GetMouseState(&mouseX, &mouseY);
+		if (mouseY > dimY+borderTop)		XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[4]);
+		else if (mouseY < 2)			XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[1]);
+		else if (mouseX < borderLeft)		XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[2]);
+		else if (mouseX > borderLeft+dimX)	XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[3]);
+		else 					XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[0]);
 
 		update();
 
@@ -166,8 +197,7 @@ int main(int argc, char** argv) {
 			else shift(0);
 		} else if (mouseDown && !resizeMode && dragMode) {
 #ifndef WINDOWS
-			XQueryPointer(info.info.x11.display, info.info.x11.window, &root, &child, &drag_x, &drag_y, &rtx, &rty, &mnt);
-			
+			if (startDrag) XQueryPointer(info.info.x11.display, info.info.x11.window, &root, &child, &drag_x, &drag_y, &rtx, &rty, &mnt);
 			XGetWindowAttributes(info.info.x11.display, info.info.x11.window, &attrs);
 			XTranslateCoordinates(info.info.x11.display, info.info.x11.window, root, 0, 0, &attrs.x, &attrs.y, &child);
 #endif
@@ -184,8 +214,41 @@ int main(int argc, char** argv) {
 
 		if (mouseDown && !resizeMode && dragMode) {
 #ifndef WINDOWS
+			startDrag = 0;
 			XQueryPointer(info.info.x11.display, info.info.x11.window, &root, &child, &new_x, &new_y, &rtx, &rty, &mnt);
-			XMoveWindow(info.info.x11.display, info.info.x11.window, attrs.x + (new_x - drag_x), attrs.y + (new_y - drag_y));
+			if (startY > 2 && startY < borderTop) {
+				XMoveWindow(info.info.x11.display, info.info.x11.window, attrs.x + (new_x - drag_x), attrs.y + (new_y - drag_y));
+			} else if (drag_y > borderTop + dimY + attrs.y || isDragB) {
+				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, attrs.x, attrs.y, attrs.width, attrs.height + (new_y - drag_y));
+				dimY = attrs.height - borderTop - borderBot;
+				isDragB = 1;
+			} else if (drag_x > dimX + borderLeft + attrs.x || isDragR) {
+				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, attrs.x, attrs.y, attrs.width + (new_x - drag_x), attrs.height);
+				dimX = attrs.width - borderLeft - borderRight;
+				isDragR = 1;
+			} else if (drag_x < borderLeft + attrs.x || isDragL) {
+				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, attrs.x + (new_x - drag_x), attrs.y, attrs.width - (new_x - drag_x), attrs.height);
+				dimX = attrs.width - borderLeft - borderRight;
+				isDragL = 1;
+	
+				double ShiftR = (double)(drag_x - new_x)/dimX*(MaxR - MinR);
+				MinR -= ShiftR; MaxR -= ShiftR;
+				offX -= (drag_x - new_x);
+			} else if (drag_y < 2 + attrs.y || isDragT) {
+				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, attrs.x, attrs.y + (new_x - drag_x), attrs.width, attrs.height - (new_x - drag_x));
+				dimY = attrs.height - borderTop - borderBot;
+				isDragT = 1;
+			}
+
+				
+			display = realloc(display, sizeof(uint32_t)*dimX*dimY);
+			finalDisplay = realloc(finalDisplay, sizeof(uint32_t)*(dimX+borderLeft+borderRight)*(dimY+borderBot+borderTop));
+	
+			texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+				dimX+borderLeft+borderRight, dimY+borderTop+borderBot);
+
+			drag_x = new_x;
+			drag_y = new_y;
 #endif
 		}
 	}
@@ -263,10 +326,10 @@ void update() {
 	int x, y;
 	for (x = 0; x < dimX; x++) {
 		for (y = 0; y < dimY; y++) {
-			display[x + y*dimX] = (x+offX > dimX*tileRenderDistance || y+offY > dimY*tileRenderDistance ||
+			display[x + y*dimX] = (x+offX > oDimX*tileRenderDistance || y+offY > oDimY*tileRenderDistance ||
 					      x+offX < 0 || y+offY < 0)?
 						0x333333:
-						bufferedDisplay[(x+offX) + (y+offY)*dimX*tileRenderDistance];
+						bufferedDisplay[(x+offX) + (y+offY)*oDimX*tileRenderDistance];
 		}
 	}
 
@@ -284,7 +347,9 @@ void update() {
 		drawLine(display, dimX, dimY, realEX, startY, realEX, realEY, 0xFFFFFF);
 		drawLine(display, dimX, dimY, startX, realEY, realEX, realEY, 0xFFFFFF);
 	}
-	
+
+	miniX = dimX - miniDimX;
+	miniY = dimY - miniDimY;
 	//Show mini map
 	for (x = miniX; x < miniX + miniDimX; x++) {
 		for (y = miniY; y < miniY + miniDimY; y++) {
@@ -293,15 +358,16 @@ void update() {
 		}
 	}
 	//Create focus box
-	int sX = miniX + ((float)offX/(dimX*tileRenderDistance))*miniDimX;
-	int sY = miniY + ((float)offY/(dimY*tileRenderDistance))*miniDimY;
-	int wX = miniDimX/tileRenderDistance;
-	int wY = miniDimY/tileRenderDistance;
+	int sX = miniX + ((float)offX/(oDimX*tileRenderDistance))*miniDimX;
+	int sY = miniY + ((float)offY/(oDimY*tileRenderDistance))*miniDimY;
+	//int wX = miniDimX/tileRenderDistance;
+	//int wY = miniDimY/tileRenderDistance;
+	int wX = (float)dimX/(oDimX*tileRenderDistance)*miniDimX;
+	int wY = (float)dimY/(oDimY*tileRenderDistance)*miniDimY;
 	drawLine(display, dimX, dimY, sX, sY, sX+wX, sY, 0xFF0000);
 	drawLine(display, dimX, dimY, sX, sY, sX, sY+wY, 0xFF0000);
 	drawLine(display, dimX, dimY, sX+wX, sY, sX+wX, sY+wY, 0xFF0000);
 	drawLine(display, dimX, dimY, sX, sY+wY, sX+wX, sY+wY, 0xFF0000);
-		
 
 	//Show buffer info
 	if (!updated) {
@@ -309,6 +375,7 @@ void update() {
 		drawText(display, dimX, dimY, fontData, displayText, 1, 0, 0, 0xFFFFFF);
 	}
 
+	createBorder();
 	//Now put the display onto the final one, which has borders and such
 	for (x = 0; x < dimX; x++) {
 		for (y = 0; y < dimY; y++) finalDisplay[(x+borderLeft)+(y+borderTop)*(dimX+borderLeft+borderRight)] = display[x+y*dimX];
@@ -378,8 +445,6 @@ void shift(int fast) {
 	startX = mouseX;
 	startY = mouseY;
 
-
-	//recalc();
 	update();
 }
 
