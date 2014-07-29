@@ -6,7 +6,8 @@ LFLAGS=-pthread `sdl2-config --cflags --libs` -lX11
 fractal: draw.o textInput.o
 	$(CC) $(DEBUG) draw.o fractal.c -o fractal $(LFLAGS)
 
-debug: 
+debug:
+	$(MAKE) clean	
 	$(MAKE) DEBUG="-g -O0"
 
 remake:
