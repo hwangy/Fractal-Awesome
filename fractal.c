@@ -214,6 +214,23 @@ int main(int argc, char** argv) {
 					sem_post(&generateBuff);
 				}
 
+				if (isDragB+isDragL+isDragR+isDragT > 0) {
+					//Adjust maximums
+					if (isDragB) {
+						double ShiftI = (double)(dimY - oDimY)/oDimY*(MaxI - MinI);
+						MinI -= ShiftI;
+					}
+					if (isDragR) {
+						double ShiftR = (double)(dimX - oDimX)/oDimX*(MaxR - MinR);
+						MaxR += ShiftR;
+					}
+
+					bufferedDisplay = realloc(bufferedDisplay, sizeof(uint32_t)*dimX*dimY*tileRenderDistance*tileRenderDistance);
+					updated = 0;
+					recalc();
+					sem_post(&generateBuff);
+				}
+
 				resizeMode = 0;
 				dragMode = 0;
 				isDragB = isDragL = isDragR = isDragT = 0;
@@ -277,16 +294,6 @@ int main(int argc, char** argv) {
 				dimY = attrs.height - borderTop - borderBot;
 				isDragT = 1;
 			}*/
-
-			//Adjust maximums
-			if (isDragB || isDragR) {
-				double ShiftR = (double)(new_x - drag_x)/dimX*(MaxR - MinR);
-				double ShiftI = (double)(new_y - drag_y)/dimY*(MaxI - MinI);
-
-				MaxR -= ShiftR;
-				MaxI += ShiftI;
-			}
-
 				
 			display = realloc(display, sizeof(uint32_t)*dimX*dimY);
 			finalDisplay = realloc(finalDisplay, sizeof(uint32_t)*(dimX+borderLeft+borderRight)*(dimY+borderBot+borderTop));
@@ -318,6 +325,7 @@ void thread(void* simon) {
 	
 	while (1) {
 		if (sem_trywait(&generateBuff) == 0) {
+			if (oDimX != dimX || oDimY != dimY) toTransmit = malloc(sizeof(uint32_t)*dimX*dimY*tileRenderDistance*tileRenderDistance);
 			progress = 0;
 			buffMinR = MinR - (MaxR - MinR)*mult;
 			buffMaxR = MaxR + (MaxR - MinR)*mult;
@@ -349,6 +357,9 @@ void thread(void* simon) {
 			updated = 1;
 			pthread_mutex_unlock(&mutex);
 			generateMiniMap();
+
+			oDimX = dimX;
+			oDimY = dimY;
 		}
 	}
 }
@@ -497,6 +508,7 @@ void shift(int fast) {
 
 void generateMiniMap() {
 	//Obviously works best where 0 = dimX mod miniDimX
+	miniDimY = miniDimX*((float)dimY/dimX);
 	int sfX = (int)(dimX*tileRenderDistance)/miniDimX;
 	int sfY = (int)(dimY*tileRenderDistance)/miniDimY;
 
@@ -512,7 +524,7 @@ void generateMiniMap() {
 				for (sY = 0; sY < sfY; sY++) {
 					//refactor average
 					avgColor *= aC/++aC;
-					avgColor += bufferedDisplay[(x*sfX+sX) + (y*sfY+sY)*dimY*tileRenderDistance]/aC;
+					avgColor += bufferedDisplay[(x*sfX+sX) + (y*sfY+sY)*dimX*tileRenderDistance]/aC;
 				}
 			}
 			miniMap[x+y*miniDimX] = avgColor;
