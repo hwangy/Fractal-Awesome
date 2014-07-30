@@ -5,6 +5,8 @@
 #include <time.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <Imlib2.h>
+#include <string.h>
 
 #include "SDL_gfxPrimitives_font.h"
 #include "draw.h"
@@ -13,6 +15,19 @@
 	#include <X11/Xlib.h>
 	#include <X11/cursorfont.h>
 	#include <SDL_syswm.h>
+	#include <dirent.h>
+	#include <sys/types.h>
+	#include <errno.h>
+
+	/*
+	 * Directory shenanigans that only work with posix
+	 * compliant OS's, such as Linux and Mac OS
+	 */
+	typedef struct dirent dirent;
+	dirent* dirList;
+	DIR* cd;
+	pthread_t dirThreadID;
+	void dirThread(void* simon);
 	
 	//Some stuff to allow window moving in *nix
 	SDL_SysWMinfo info;
@@ -52,6 +67,7 @@ struct WOO_Window {
 #ifndef WINDOWS
 	XWindowAttributes attrs;
 	Window root, parent, *children;
+	int focus;
 #endif
 };
 typedef struct WOO_Window WOO_Window;
@@ -59,12 +75,7 @@ typedef struct WOO_Window WOO_Window;
 const int rmax = 30, iterations = 100;
 
 WOO_Window mw;
-	//This is going to be replaced by the WOO_Window structure
-	static SDL_Window* windowSA;
-	SDL_Renderer* renderSA;
-	SDL_Texture* textureSA;
-	int dimXSA = 200, dimYSA = 200;
-	//TO BE REPALCED
+WOO_Window sa;
 
 uint32_t* miniMap;
 char* displayText;
@@ -99,6 +110,7 @@ void shift(int fast);
 void generateMiniMap();
 void createBorder();
 void createSaveAs();
+void saveImg();
 
 int main(int argc, char** argv) {
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
@@ -146,7 +158,8 @@ int main(int argc, char** argv) {
 		.display = malloc(sizeof(uint32_t)*(tmp_var[0] * tmp_var[0])),
 		.bufferX = RENDER_DISTANCE * tmp_var[0],
 	       	.bufferY = RENDER_DISTANCE * tmp_var[0],	
-		.buffer = malloc(sizeof(uint32_t)*(RENDER_DISTANCE*tmp_var[0] * RENDER_DISTANCE*tmp_var[0]))
+		.buffer = malloc(sizeof(uint32_t)*(RENDER_DISTANCE*tmp_var[0] * RENDER_DISTANCE*tmp_var[0])),
+		.focus = 1
 	};
 
 	createBorder();
@@ -189,6 +202,7 @@ int main(int argc, char** argv) {
 	
 	sem_init(&generateBuff, 0, 1);
 	pthread_create(&threadID, NULL, (void* (*)(void*))&thread, (int*)1);
+	pthread_create(&dirThreadID, NULL, (void* (*)(void*))&dirThread, (int*)1);
 
 	int startDrag = 0;
 
@@ -214,6 +228,9 @@ int main(int argc, char** argv) {
 					SDL_DestroyWindow(mw.window);
 					SDL_Quit();
 					return 0;
+				} else if (startX > 14*8 + 25 && startX < 14*8 + 25 + 7*8 && startY < 15) {
+					//Save as dialogue selected
+					createSaveAs();
 				} else if ((startY < mw.borderTop || startY > mw.borderTop+mw.dimY) ||
 					   (startX < mw.borderLeft || startX > mw.borderLeft+mw.dimX)) {	//Testing to see if grabbing border
 					dragMode = 1;
@@ -289,31 +306,23 @@ int main(int argc, char** argv) {
 			startDrag = 0;
 			XQueryPointer(info.info.x11.display, info.info.x11.window, &mw.root, &child, &new_x, &new_y, &rtx, &rty, &mnt);
 			if (startY > 2 && startY < mw.borderTop) {
-				XMoveWindow(info.info.x11.display, info.info.x11.window, mw.attrs.x + (new_x - drag_x), mw.attrs.y + (new_y - drag_y));
+				XMoveWindow(info.info.x11.display, info.info.x11.window, 
+						mw.attrs.x + (new_x - drag_x), mw.attrs.y + (new_y - drag_y));
 			} else if (drag_y > mw.borderTop + mw.dimY + mw.attrs.y || isDragB) {
-				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, mw.attrs.x, mw.attrs.y, mw.attrs.width, mw.attrs.height + (new_y - drag_y));
+				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, 
+						mw.attrs.x, mw.attrs.y, mw.attrs.width, mw.attrs.height + (new_y - drag_y));
 				mw.dimY = mw.attrs.height - mw.borderTop - mw.borderBot;
 				isDragB = 1;
 			} else if (drag_x > mw.dimX + mw.borderLeft + mw.attrs.x || isDragR) {
-				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, mw.attrs.x, mw.attrs.y, mw.attrs.width + (new_x - drag_x), mw.attrs.height);
+				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, 
+						mw.attrs.x, mw.attrs.y, mw.attrs.width + (new_x - drag_x), mw.attrs.height);
 				mw.dimX = mw.attrs.width - mw.borderLeft - mw.borderRight;
 				isDragR = 1;
-			} /*else if (drag_x < mw.borderLeft + mw.attrs.x || isDragL) {
-				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, mw.attrs.x + (new_x - drag_x), mw.attrs.y, mw.attrs.width - (new_x - drag_x), mw.attrs.height);
-				mw.dimX = mw.attrs.width - mw.borderLeft - mw.borderRight;
-				isDragL = 1;
-	
-				double ShiftR = (double)(drag_x - new_x)/mw.dimX*(MaxR - MinR);
-				MinR -= ShiftR; MaxR -= ShiftR;
-				offX -= (drag_x - new_x);
-			} else if (drag_y < 2 + mw.attrs.y || isDragT) {
-				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, mw.attrs.x, mw.attrs.y + (new_x - drag_x), mw.attrs.width, mw.attrs.height - (new_x - drag_x));
-				mw.dimY = mw.attrs.height - mw.borderTop - mw.borderBot;
-				isDragT = 1;
-			}*/
-				
+			}
+
 			mw.display = realloc(mw.display, sizeof(uint32_t)*mw.dimX*mw.dimY);
-			mw.pubDisplay = realloc(mw.pubDisplay, sizeof(uint32_t)*(mw.dimX+mw.borderLeft+mw.borderRight)*(mw.dimY+mw.borderBot+mw.borderTop));
+			mw.pubDisplay = realloc(mw.pubDisplay, 
+					sizeof(uint32_t)*(mw.dimX+mw.borderLeft+mw.borderRight)*(mw.dimY+mw.borderBot+mw.borderTop));
 	
 			mw.texture = SDL_CreateTexture(mw.render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
 				mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot);
@@ -326,6 +335,44 @@ int main(int argc, char** argv) {
 
 	return 0;
 }
+
+#ifndef WINDOWS
+void dirThread(void* simon) {
+	char* cmd = malloc(100);
+	char* arg = malloc(100);
+
+	printf("%s: %d\n", "[EACCES]", EACCES);
+	printf("%s: %d\n", "[ELOOP]", ELOOP);
+	printf("%s: %d\n", "[ENAMETOOLONG]", ENAMETOOLONG);
+	printf("%s: %d\n", "[ENOENT]", ENOENT);
+	printf("%s: %d\n", "[ENOTDIR]", ENOTDIR);
+	printf("%s: %d\n", "[EMFILE]", EMFILE);
+	printf("%s: %d\n", "[ENFILE]", ENFILE);
+
+	while (1) {
+		printf("Enter Command:   ");
+		scanf("%s", cmd);
+		
+		if (!strcmp(cmd, "cd")) {
+			printf("Enter Arguments: ");
+			scanf("%s", arg);
+			
+			cd = opendir(arg);
+			if (cd == NULL) printf("Cannot Open Directory, ERROR: %d\n", errno);
+			else {
+				while ((dirList = readdir(cd)) != NULL) {
+					printf("%s\n", dirList->d_name);
+				}
+			}
+		} else if (!strcmp(cmd, "ls")) {
+			rewinddir(cd);
+			while ((dirList = readdir(cd)) != NULL) {
+				printf("%s\n", dirList->d_name);
+			}
+		}
+	}
+}
+#endif
 
 void thread(void* simon) {
 	uint32_t* toTransmit = malloc(sizeof(uint32_t)*mw.dimX*mw.dimY*RENDER_DISTANCE*RENDER_DISTANCE);
@@ -341,7 +388,8 @@ void thread(void* simon) {
 	
 	while (1) {
 		if (sem_trywait(&generateBuff) == 0) {
-			if (oDimX != mw.dimX || oDimY != mw.dimY) toTransmit = malloc(sizeof(uint32_t)*mw.dimX*mw.dimY*RENDER_DISTANCE*RENDER_DISTANCE);
+			if (oDimX != mw.dimX || oDimY != mw.dimY) 
+				toTransmit = malloc(sizeof(uint32_t)*mw.dimX*mw.dimY*RENDER_DISTANCE*RENDER_DISTANCE);
 			progress = 0;
 			buffMinR = MinR - (MaxR - MinR)*mult;
 			buffMaxR = MaxR + (MaxR - MinR)*mult;
@@ -410,8 +458,10 @@ void update() {
 	//Create zoom box
 	if (mouseDown && resizeMode) {
 		double proportion = (double)mw.dimX/mw.dimY;
-		realEX = (abs(mouseX - startX) > abs(mouseY - startY))?abs(mouseX-startX):(int)((double)abs(mouseY - startY)*proportion);
-		realEY = (abs(mouseY - startY) > abs(mouseX - startX))?abs(mouseY-startY):(int)((double)abs(mouseX - startX)*(1.0f/proportion));
+		realEX = (abs(mouseX - startX) > abs(mouseY - startY))?
+			abs(mouseX-startX):(int)((double)abs(mouseY - startY)*proportion);
+		realEY = (abs(mouseY - startY) > abs(mouseX - startX))?
+			abs(mouseY-startY):(int)((double)abs(mouseX - startX)*(1.0f/proportion));
 		if (mouseX < startX) realEX*=-1;
 		if (mouseY < startY) realEY*=-1;
 		realEX += startX; realEY += startY;
@@ -428,7 +478,8 @@ void update() {
 	for (x = miniX; x < miniX + miniDimX; x++) {
 		for (y = miniY; y < miniY + miniDimY; y++) {
 			mw.display[x + y*mw.dimX] = (x == miniX || y == miniY || 
-					       x == miniX+miniDimX-1 || y == miniY+miniDimY-1)?0x000000:miniMap[(x-miniX) + (y-miniY)*miniDimX];
+						x == miniX+miniDimX-1 || y == miniY+miniDimY-1)?
+						0x000000:miniMap[(x-miniX) + (y-miniY)*miniDimX];
 		}
 	}
 	//Create focus box
@@ -452,7 +503,9 @@ void update() {
 	createBorder();
 	//Now put the mw.display onto the final one, which has borders and such
 	for (x = 0; x < mw.dimX; x++) {
-		for (y = 0; y < mw.dimY; y++) mw.pubDisplay[(x+mw.borderLeft)+(y+mw.borderTop)*(mw.dimX+mw.borderLeft+mw.borderRight)] = mw.display[x+y*mw.dimX];
+		for (y = 0; y < mw.dimY; y++) mw.pubDisplay[(x+mw.borderLeft)+
+				(y+mw.borderTop)*(mw.dimX+mw.borderLeft+mw.borderRight)] = 
+				(mw.focus)?mw.display[x+y*mw.dimX]:(mw.display[x+y*mw.dimX] & 0xFEFEFE) >> 1;
 	}
 
 	SDL_UpdateTexture(mw.texture, NULL, mw.pubDisplay, (mw.dimX+mw.borderLeft+mw.borderRight)*4);
@@ -488,7 +541,8 @@ void recalc() {
 			    x <  mw.dimX*(RENDER_DISTANCE+1.0f)/2.0f &&
 			    y >= mw.dimY*(RENDER_DISTANCE-1.0f)/2.0f &&
 			    y <  mw.dimY*(RENDER_DISTANCE+1.0f)/2.0f) {
-				mw.buffer[x+y*mw.dimX*RENDER_DISTANCE] = getColor(x-mw.dimX*(RENDER_DISTANCE-1)/2, y-mw.dimY*(RENDER_DISTANCE-1)/2);
+				mw.buffer[x+y*mw.dimX*RENDER_DISTANCE] = getColor(x-mw.dimX*(RENDER_DISTANCE-1)/2,
+										y-mw.dimY*(RENDER_DISTANCE-1)/2);
 			} else {
 				mw.buffer[x+y*mw.dimX*RENDER_DISTANCE] = 0x333333;
 			}
@@ -559,15 +613,50 @@ void createBorder() {
 			mw.pubDisplay[x + y*(mw.dimX+mw.borderLeft+mw.borderRight)] = 0x444444;
 		}
 	}
-	drawText(mw.pubDisplay, mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot, fontData, "X", 1, (mw.dimX+mw.borderLeft+mw.borderRight-8-3), 3, 0xFFFFFF);
+	drawText(mw.pubDisplay, mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot,
+			fontData, "X", 1, (mw.dimX+mw.borderLeft+mw.borderRight-8-3), 3, 0xFFFFFF);
+	drawText(mw.pubDisplay, mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot,
+			fontData, "FractalAwesome", 1, 3, 3, 0xFF0000);
+	drawText(mw.pubDisplay, mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot,
+			fontData, "Save As", 1, 14*8 + 25, 3, 0xFFFFFF);
 }
 
-/*void createSaveAs() {
-	mw.window = SDL_CreateWindow("Save As", mw.attrs.x + mw.dimX + mw.borderLeft + mw.borderRight + 10, SDL_WINDOWPOS_UNDEFINED,
-			200, 200, SDL_WINDOW_BORDERLESS);
+void createSaveAs() {
+	int tmp_var[3] = {300, 15, 3};
+	SDL_Window* window = SDL_CreateWindow("Save As", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 
+			tmp_var[0]+2*tmp_var[2], tmp_var[0]+tmp_var[1]+tmp_var[2], SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE);
 
-	mw.renderSA = SDL_CreateRenderer(mw.windowSA, -1, 0);
-	mw.textureSA = SDL_CreateTexture(mw.renderSA, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-			mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot);
-}*/
+	SDL_Renderer* render = SDL_CreateRenderer(window, -1, 0);
+	SDL_Texture* texture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+			tmp_var[0]+2*tmp_var[2], tmp_var[0]+tmp_var[1] + tmp_var[2]);
+
+	//This window is initialized w/o a buffer
+	sa = (WOO_Window) {
+		.dimX = tmp_var[0],
+		.dimY = (int)tmp_var[0]*1.5,
+		.borderTop = tmp_var[1],
+		.borderLeft = tmp_var[2],
+		.borderRight = tmp_var[2],
+		.borderBot = tmp_var[2],
+		.window = window,
+		.render = render,
+		.texture = texture,
+		.pubDisplay = malloc(sizeof(uint32_t)*(tmp_var[0]+tmp_var[2]+tmp_var[2])*(tmp_var[0]+tmp_var[1]+tmp_var[2])),
+		.display = malloc(sizeof(uint32_t)*(tmp_var[0] * tmp_var[0])),
+		.bufferX = -1,
+	       	.bufferY = -1,
+		.focus = 1
+	};
 	
+	saveImg();
+
+	mw.focus = 0;
+}
+
+void saveImg() {
+	Imlib_Image img = imlib_create_image_using_data(RENDER_DISTANCE*mw.dimX, RENDER_DISTANCE*mw.dimY, mw.buffer);
+	imlib_context_set_image(img);
+	imlib_image_set_format("png");
+	imlib_save_image("out.png");
+	imlib_free_image();
+}	
