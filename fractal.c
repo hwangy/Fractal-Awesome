@@ -42,10 +42,12 @@
 	unsigned int mnt;
 
 	Cursor* xCursors;
-	int isDragL = 0, isDragR = 0, isDragB = 0, isDragT = 0;
-#endif
-
-#define RENDER_DISTANCE 5
+	int isDragL = 0, isDragR = 0, isDragB = 0, isDragT = 0;					//THERE
+												//ARE
+	int currentID = 2;									//JUST
+#endif												//TOO
+												//MANY
+#define RENDER_DISTANCE 5									//VVVARRRIAAABBLLEESS
 
 struct WOO_Window {
 	int dimX;
@@ -61,6 +63,10 @@ struct WOO_Window {
 	uint32_t* pubDisplay;
 	uint32_t* display;
 	uint32_t* buffer;
+
+	char* title;
+	int len;
+	char* sub;
 	
 	int bufferX;
 	int bufferY;
@@ -68,6 +74,8 @@ struct WOO_Window {
 	XWindowAttributes attrs;
 	Window root, parent, *children;
 	int focus;
+
+	uint32_t id;
 #endif
 };
 typedef struct WOO_Window WOO_Window;
@@ -102,13 +110,15 @@ int mouseX, mouseY, startX, startY;
 int startX, startY, realEX, realEY;
 double MinR, MaxR, MinI, MaxI;
 
+WOO_Window* CD;
+
 int getCount(double x, double y);
 void update();
 void resize();
 void recalc();
 void shift(int fast);
 void generateMiniMap();
-void createBorder();
+void createBorder(WOO_Window* win);
 void createSaveAs();
 void saveImg();
 
@@ -159,10 +169,21 @@ int main(int argc, char** argv) {
 		.bufferX = RENDER_DISTANCE * tmp_var[0],
 	       	.bufferY = RENDER_DISTANCE * tmp_var[0],	
 		.buffer = malloc(sizeof(uint32_t)*(RENDER_DISTANCE*tmp_var[0] * RENDER_DISTANCE*tmp_var[0])),
-		.focus = 1
+		.title = malloc(100),
+		.len = 14,
+		.sub = malloc(100),
+		.focus = 1,
+		.id = currentID
 	};
+	
 
-	createBorder();
+	CD = &mw;
+	currentID++;
+
+	memcpy(mw.title, "FractalAwesome", 15);
+	memcpy(mw.sub, "Save As", 8);
+
+	createBorder(&mw);
 
 #ifndef WINDOWS
 	SDL_VERSION(&info.version);
@@ -202,7 +223,7 @@ int main(int argc, char** argv) {
 	
 	sem_init(&generateBuff, 0, 1);
 	pthread_create(&threadID, NULL, (void* (*)(void*))&thread, (int*)1);
-	pthread_create(&dirThreadID, NULL, (void* (*)(void*))&dirThread, (int*)1);
+	//pthread_create(&dirThreadID, NULL, (void* (*)(void*))&dirThread, (int*)1);
 
 	int startDrag = 0;
 
@@ -211,11 +232,13 @@ int main(int argc, char** argv) {
 
 		SDL_Event events;
 		while (SDL_PollEvent(&events)) {
+
 			if (events.type == SDL_QUIT) {
-				SDL_DestroyWindow(mw.window);
+				SDL_DestroyWindow(CD->window);
 				SDL_Quit();
 				return 0;
 			}
+			
 			if (events.type == SDL_KEYDOWN && events.key.keysym.sym == SDLK_LSHIFT) resizeMode = 1;
 			else if (events.type == SDL_KEYDOWN && events.key.keysym.sym == SDLK_r) {updated = 0; recalc(); sem_post(&generateBuff);}
 			else if (events.type == SDL_KEYUP && events.key.keysym.sym == SDLK_LSHIFT) resizeMode = 0;
@@ -223,16 +246,18 @@ int main(int argc, char** argv) {
 				mouseDown = 1;
 				SDL_GetMouseState(&startX, &startY);
 
-				//Close mw.window button
-				if (startX > (mw.dimX+mw.borderLeft+mw.borderRight-8-3-3) && startY < 3+8+3) {
-					SDL_DestroyWindow(mw.window);
+				//Close CD->window button
+				if (startX > (CD->dimX+CD->borderLeft+CD->borderRight-8-3-3) && startY < 3+8+3) {
+					SDL_DestroyWindow(CD->window);
 					SDL_Quit();
 					return 0;
-				} else if (startX > 14*8 + 25 && startX < 14*8 + 25 + 7*8 && startY < 15) {
+				} else if (startX > 14*8 + 25 && startX < 14*8 + 25 + 7*8 && startY < 15 && mw.focus) {
 					//Save as dialogue selected
 					createSaveAs();
-				} else if ((startY < mw.borderTop || startY > mw.borderTop+mw.dimY) ||
-					   (startX < mw.borderLeft || startX > mw.borderLeft+mw.dimX)) {	//Testing to see if grabbing border
+					mouseDown = 0;
+					continue;
+				} else if ((startY < CD->borderTop || startY > CD->borderTop+CD->dimY) ||
+					   (startX < CD->borderLeft || startX > CD->borderLeft+CD->dimX)) {	//Testing to see if grabbing border
 					dragMode = 1;
 					startDrag = 1;
 				}
@@ -240,7 +265,7 @@ int main(int argc, char** argv) {
 			} else if (events.type == SDL_MOUSEBUTTONUP) {
 				mouseDown = 0;
 				SDL_GetMouseState(&mouseX, &mouseY);
-				if (resizeMode && updated) {
+				if (resizeMode && updated && mw.focus) {
 					updated = 0;
 					resize();
 					recalc();
@@ -248,18 +273,18 @@ int main(int argc, char** argv) {
 					sem_post(&generateBuff);
 				}
 
-				if (isDragB+isDragL+isDragR+isDragT > 0) {
+				if (isDragB+isDragL+isDragR+isDragT > 0 && mw.focus) {
 					//Adjust maximums
 					if (isDragB) {
-						double ShiftI = (double)(mw.dimY - oDimY)/oDimY*(MaxI - MinI);
+						double ShiftI = (double)(CD->dimY - oDimY)/oDimY*(MaxI - MinI);
 						MinI -= ShiftI;
 					}
 					if (isDragR) {
-						double ShiftR = (double)(mw.dimX - oDimX)/oDimX*(MaxR - MinR);
+						double ShiftR = (double)(CD->dimX - oDimX)/oDimX*(MaxR - MinR);
 						MaxR += ShiftR;
 					}
 
-					mw.buffer = realloc(mw.buffer, sizeof(uint32_t)*mw.dimX*mw.dimY*RENDER_DISTANCE*RENDER_DISTANCE);
+					CD->buffer = realloc(CD->buffer, sizeof(uint32_t)*CD->dimX*CD->dimY*RENDER_DISTANCE*RENDER_DISTANCE);
 					updated = 0;
 					recalc();
 					sem_post(&generateBuff);
@@ -269,12 +294,13 @@ int main(int argc, char** argv) {
 				dragMode = 0;
 				isDragB = isDragL = isDragR = isDragT = 0;
 			}
+
 		}
 		SDL_GetMouseState(&mouseX, &mouseY);
-		if (mouseY > mw.dimY+mw.borderTop)		XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[4]);
+		if (mouseY > CD->dimY+CD->borderTop)		XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[4]);
 		else if (mouseY < 2)			XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[1]);
-		else if (mouseX < mw.borderLeft)		XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[2]);
-		else if (mouseX > mw.borderLeft+mw.dimX)	XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[3]);
+		else if (mouseX < CD->borderLeft)		XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[2]);
+		else if (mouseX > CD->borderLeft+CD->dimX)	XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[3]);
 		else 					XDefineCursor(info.info.x11.display, info.info.x11.window, xCursors[0]);
 
 		update();
@@ -282,13 +308,13 @@ int main(int argc, char** argv) {
 		if (mouseDown && !resizeMode && !dragMode) {
 			SDL_GetMouseState(&mouseX, &mouseY);
 			if (mouseX >= miniX && mouseX < miniX + miniDimX &&
-			    mouseY >= miniY && mouseY < miniY + miniDimY) shift(1);
+			    mouseY >= miniY && mouseY < miniY + miniDimY && mw.focus) shift(1);
 			else shift(0);
 		} else if (mouseDown && !resizeMode && dragMode) {
 #ifndef WINDOWS
-			if (startDrag) XQueryPointer(info.info.x11.display, info.info.x11.window, &mw.root, &child, &drag_x, &drag_y, &rtx, &rty, &mnt);
-			XGetWindowAttributes(info.info.x11.display, info.info.x11.window, &mw.attrs);
-			XTranslateCoordinates(info.info.x11.display, info.info.x11.window, mw.root, 0, 0, &mw.attrs.x, &mw.attrs.y, &child);
+			if (startDrag) XQueryPointer(info.info.x11.display, info.info.x11.window, &CD->root, &child, &drag_x, &drag_y, &rtx, &rty, &mnt);
+			XGetWindowAttributes(info.info.x11.display, info.info.x11.window, &CD->attrs);
+			XTranslateCoordinates(info.info.x11.display, info.info.x11.window, CD->root, 0, 0, &CD->attrs.x, &CD->attrs.y, &child);
 #endif
 		}
 
@@ -304,28 +330,28 @@ int main(int argc, char** argv) {
 		if (mouseDown && !resizeMode && dragMode) {
 #ifndef WINDOWS
 			startDrag = 0;
-			XQueryPointer(info.info.x11.display, info.info.x11.window, &mw.root, &child, &new_x, &new_y, &rtx, &rty, &mnt);
-			if (startY > 2 && startY < mw.borderTop) {
+			XQueryPointer(info.info.x11.display, info.info.x11.window, &CD->root, &child, &new_x, &new_y, &rtx, &rty, &mnt);
+			if (startY > 2 && startY < CD->borderTop) {
 				XMoveWindow(info.info.x11.display, info.info.x11.window, 
-						mw.attrs.x + (new_x - drag_x), mw.attrs.y + (new_y - drag_y));
-			} else if (drag_y > mw.borderTop + mw.dimY + mw.attrs.y || isDragB) {
+						CD->attrs.x + (new_x - drag_x), CD->attrs.y + (new_y - drag_y));
+			} else if (drag_y > CD->borderTop + CD->dimY + CD->attrs.y || isDragB) {
 				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, 
-						mw.attrs.x, mw.attrs.y, mw.attrs.width, mw.attrs.height + (new_y - drag_y));
-				mw.dimY = mw.attrs.height - mw.borderTop - mw.borderBot;
+						CD->attrs.x, CD->attrs.y, CD->attrs.width, CD->attrs.height + (new_y - drag_y));
+				CD->dimY = CD->attrs.height - CD->borderTop - CD->borderBot;
 				isDragB = 1;
-			} else if (drag_x > mw.dimX + mw.borderLeft + mw.attrs.x || isDragR) {
+			} else if (drag_x > CD->dimX + CD->borderLeft + CD->attrs.x || isDragR) {
 				XMoveResizeWindow(info.info.x11.display, info.info.x11.window, 
-						mw.attrs.x, mw.attrs.y, mw.attrs.width + (new_x - drag_x), mw.attrs.height);
-				mw.dimX = mw.attrs.width - mw.borderLeft - mw.borderRight;
+						CD->attrs.x, CD->attrs.y, CD->attrs.width + (new_x - drag_x), CD->attrs.height);
+				CD->dimX = CD->attrs.width - CD->borderLeft - CD->borderRight;
 				isDragR = 1;
 			}
 
-			mw.display = realloc(mw.display, sizeof(uint32_t)*mw.dimX*mw.dimY);
-			mw.pubDisplay = realloc(mw.pubDisplay, 
-					sizeof(uint32_t)*(mw.dimX+mw.borderLeft+mw.borderRight)*(mw.dimY+mw.borderBot+mw.borderTop));
+			CD->display = realloc(CD->display, sizeof(uint32_t)*CD->dimX*CD->dimY);
+			CD->pubDisplay = realloc(CD->pubDisplay, 
+					sizeof(uint32_t)*(CD->dimX+CD->borderLeft+CD->borderRight)*(CD->dimY+CD->borderBot+CD->borderTop));
 	
-			mw.texture = SDL_CreateTexture(mw.render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-				mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot);
+			CD->texture = SDL_CreateTexture(CD->render, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+				CD->dimX+CD->borderLeft+CD->borderRight, CD->dimY+CD->borderTop+CD->borderBot);
 
 			drag_x = new_x;
 			drag_y = new_y;
@@ -500,12 +526,49 @@ void update() {
 		drawText(mw.display, mw.dimX, mw.dimY, fontData, displayText, 1, 0, 0, 0xFFFFFF);
 	}
 
-	createBorder();
+	createBorder(&mw);
 	//Now put the mw.display onto the final one, which has borders and such
 	for (x = 0; x < mw.dimX; x++) {
 		for (y = 0; y < mw.dimY; y++) mw.pubDisplay[(x+mw.borderLeft)+
 				(y+mw.borderTop)*(mw.dimX+mw.borderLeft+mw.borderRight)] = 
 				(mw.focus)?mw.display[x+y*mw.dimX]:(mw.display[x+y*mw.dimX] & 0xFEFEFE) >> 1;
+	}
+
+	if (!mw.focus) {
+		//Process save as window updates
+		createBorder(&sa);
+
+		for (x = 0; x < sa.dimX; x++) {
+			for (y = 0; y < sa.dimY; y++) {
+				sa.display[x+y*sa.dimX] = 0xFFFFFF;
+			}
+		}
+	
+		/*
+		 * The maximum # of lines SA can show is sa.dimY/8
+		 * However, we need to show the dialogue box which is for now
+		 * 3+8+3 pixels tall and we need to have a gap between the lines.
+		 * 2 pixels?
+		 */
+		int currentY = 0;
+		rewinddir(cd);
+		while ((dirList = readdir(cd)) != NULL) {
+			if (currentY + 14 < sa.dimY) {
+				drawText(sa.display, sa.dimX, sa.dimY, fontData, dirList->d_name, 1, 0, currentY, 0x000000);
+				currentY+=10;
+			}
+		}
+				
+	
+		for (x = 0; x < sa.dimX; x++) {
+			for (y = 0; y < sa.dimY; y++) sa.pubDisplay[(x+sa.borderLeft)+
+					(y+sa.borderTop)*(sa.dimX+sa.borderLeft+sa.borderRight)] = sa.display[x+y*sa.dimX];
+		}
+
+		SDL_UpdateTexture(sa.texture, NULL, sa.pubDisplay, (sa.dimX + sa.borderLeft + sa.borderRight)*4);
+		SDL_RenderClear(sa.render);
+		SDL_RenderCopy(sa.render, sa.texture, 0, 0);
+		SDL_RenderPresent(sa.render);
 	}
 
 	SDL_UpdateTexture(mw.texture, NULL, mw.pubDisplay, (mw.dimX+mw.borderLeft+mw.borderRight)*4);
@@ -602,23 +665,19 @@ void generateMiniMap() {
 	}
 }
 
-void dragResize(int w, int h) {
-	
-}
-
-void createBorder() {
+void createBorder(WOO_Window* win) {
 	int x, y;
-	for (x = 0; x < mw.dimX + mw.borderLeft+mw.borderRight; x++) {
-		for (y = 0; y < mw.dimY + mw.borderTop + mw.borderBot; y++) {
-			mw.pubDisplay[x + y*(mw.dimX+mw.borderLeft+mw.borderRight)] = 0x444444;
+	for (x = 0; x < win->dimX + win->borderLeft+win->borderRight; x++) {
+		for (y = 0; y < win->dimY + win->borderTop + win->borderBot; y++) {
+			win->pubDisplay[x + y*(win->dimX+win->borderLeft+win->borderRight)] = 0x444444;
 		}
 	}
-	drawText(mw.pubDisplay, mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot,
-			fontData, "X", 1, (mw.dimX+mw.borderLeft+mw.borderRight-8-3), 3, 0xFFFFFF);
-	drawText(mw.pubDisplay, mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot,
-			fontData, "FractalAwesome", 1, 3, 3, 0xFF0000);
-	drawText(mw.pubDisplay, mw.dimX+mw.borderLeft+mw.borderRight, mw.dimY+mw.borderTop+mw.borderBot,
-			fontData, "Save As", 1, 14*8 + 25, 3, 0xFFFFFF);
+	drawText(win->pubDisplay, win->dimX+win->borderLeft+win->borderRight, win->dimY+win->borderTop+win->borderBot,
+			fontData, "X", 1, (win->dimX+win->borderLeft+win->borderRight-8-3), 3, 0xFFFFFF);
+	drawText(win->pubDisplay, win->dimX+win->borderLeft+win->borderRight, win->dimY+win->borderTop+win->borderBot,
+			fontData, win->title, 1, 3, 3, 0xFF0000);
+	drawText(win->pubDisplay, win->dimX+win->borderLeft+win->borderRight, win->dimY+win->borderTop+win->borderBot,
+			fontData, win->sub, 1, win->len*8 + 25, 3, 0xFFFFFF);
 }
 
 void createSaveAs() {
@@ -633,7 +692,7 @@ void createSaveAs() {
 	//This window is initialized w/o a buffer
 	sa = (WOO_Window) {
 		.dimX = tmp_var[0],
-		.dimY = (int)tmp_var[0]*1.5,
+		.dimY = tmp_var[0],
 		.borderTop = tmp_var[1],
 		.borderLeft = tmp_var[2],
 		.borderRight = tmp_var[2],
@@ -645,10 +704,25 @@ void createSaveAs() {
 		.display = malloc(sizeof(uint32_t)*(tmp_var[0] * tmp_var[0])),
 		.bufferX = -1,
 	       	.bufferY = -1,
-		.focus = 1
+		.title = malloc(100),
+		.len = 8,
+		.sub = malloc(100),
+		.focus = 1,
+		.id = currentID
 	};
+
+	currentID++;
+
+	char tmp[10];
+	memcpy(tmp, ".", 2);
+	cd = opendir(tmp);
+
+	memcpy(sa.title, "Save As", 8);
+	memcpy(sa.sub, "", 1);
 	
 	saveImg();
+
+	CD = &sa;
 
 	mw.focus = 0;
 }
