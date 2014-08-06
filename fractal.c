@@ -113,6 +113,8 @@ double MinR, MaxR, MinI, MaxI;
 WOO_Window* CD;
 
 int getCount(double x, double y);
+uint32_t getColor(int x, int y);
+uint32_t getColor_debug(int x, int y);		//VERY verbose version of getColor
 void update();
 void resize();
 void recalc();
@@ -467,6 +469,26 @@ uint32_t getColor(int x, int y) {
 	}
 
 	uint32_t color = 0xFFFFFF*((count == iterations)?0:((double)count/iterations));
+	return color;
+}
+
+uint32_t getColor_debug(int x, int y) {
+	double ref = (MaxR-MinR)/mw.dimX, imf = (MaxI - MinI)/mw.dimY;
+	
+	printf("REF: %f\nIMF: %f\n", ref, imf);
+
+	double complex val = (MinR+x*ref) + (MaxI-y*imf)*I;
+	double complex z = val;
+	int count = 0;
+	
+	while (count < iterations && creal(z) + cimag(z) < rmax) {
+		printf("%f, %f\n", creal(z), cimag(z));
+	       z = z*z + val;
+	       count++;
+	}
+
+	uint32_t color = 0xFFFFFF*((count == iterations)?0:((double)count/iterations));
+	return color;
 }
 
 void update() {
